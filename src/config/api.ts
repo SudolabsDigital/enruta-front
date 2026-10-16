@@ -25,10 +25,14 @@ api.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('enruta_token');
       localStorage.removeItem('enruta_user');
+      localStorage.removeItem('enruta_active_business');
       // Evitar redirección infinita si ya estamos en login
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
+    }
+    if (error.response?.status === 403 && error.config?.url !== '/user') {
+      window.dispatchEvent(new Event('enruta:access-denied'));
     }
     return Promise.reject(error);
   }

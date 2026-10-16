@@ -26,8 +26,8 @@ export const LoginPage: React.FC = () => {
       login(data.token, data.user);
       success(`Bienvenido de nuevo, ${data.user.name}`);
       
-      if (data.user.role === 'standard_user') {
-        navigate('/');
+      if (data.user.role === 'standard_user' && !data.user.businesses?.length && !data.user.business_memberships?.length) {
+        navigate('/console/search');
       } else {
         navigate('/console');
       }

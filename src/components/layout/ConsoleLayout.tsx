@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { GlobalHUD } from './GlobalHUD';
 import { useAuth } from '../../contexts/AuthContext';
@@ -7,12 +7,13 @@ import { OnboardingPage } from '../../features/console/presentation/pages/Onboar
 
 export const ConsoleLayout: React.FC = () => {
   const { user } = useAuth();
+  const location = useLocation();
   
   const isSuperAdmin = user?.role === 'super_admin';
   const hasBusiness = user?.businesses && user.businesses.length > 0;
 
   // Si no es super admin y no tiene negocios, mostrar el Onboarding en lugar del layout
-  if (!isSuperAdmin && !hasBusiness) {
+  if (!isSuperAdmin && !hasBusiness && location.pathname !== '/console/search') {
     return <OnboardingPage />;
   }
 

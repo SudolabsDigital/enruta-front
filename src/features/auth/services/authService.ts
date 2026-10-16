@@ -6,6 +6,11 @@ export interface User {
   email: string;
   role: string;
   city_id?: string;
+  business_memberships?: Array<{
+    id: string;
+    status: 'pending' | 'active' | 'rejected' | 'revoked';
+    business: { id: string; name: string; ruc: string | null };
+  }>;
   businesses?: Array<{
     id: string;
     name: string;
@@ -40,8 +45,6 @@ export const authService = {
 
   logout: async (): Promise<void> => {
     await api.post('/logout');
-    localStorage.removeItem('enruta_token');
-    localStorage.removeItem('enruta_user');
   },
 
   getUser: async (): Promise<User> => {

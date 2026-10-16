@@ -59,7 +59,7 @@ export const RegisterPage: React.FC = () => {
       
       // Redirección basada en el tipo de cuenta
       if (accountType === 'b2c') {
-        navigate('/'); // Mapa B2C
+        navigate('/console/search'); // Consulta existente; Google y experiencia B2C completa siguen en T006.
       } else {
         navigate('/console'); // Onboarding/Console B2B
       }

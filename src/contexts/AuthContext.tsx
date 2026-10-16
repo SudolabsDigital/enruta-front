@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { authService, type User } from '../features/auth/services/authService';
 
 interface AuthContextType {
@@ -6,7 +6,7 @@ interface AuthContextType {
   token: string | null;
   activeBusinessId: string | null;
   login: (token: string, user: User) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   getUser: () => Promise<void>;
   switchBusiness: (businessId: string) => void;
   isLoading: boolean;
@@ -20,69 +20,63 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    // Inicializar desde localStorage
-    const storedToken = localStorage.getItem('enruta_token');
-    const storedUser = localStorage.getItem('enruta_user');
-    const storedBusinessId = localStorage.getItem('enruta_active_business');
-
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      const parsedUser = JSON.parse(storedUser) as User;
-      setUser(parsedUser);
-      
-      if (storedBusinessId && parsedUser.businesses?.some(b => b.id === storedBusinessId)) {
-        setActiveBusinessId(storedBusinessId);
-      } else if (parsedUser.businesses && parsedUser.businesses.length > 0) {
-        setActiveBusinessId(parsedUser.businesses[0].id);
-      }
-    }
-    setIsLoading(false);
+  const clearSession = useCallback(() => {
+    setUser(null);
+    setToken(null);
+    setActiveBusinessId(null);
+    ['enruta_token', 'enruta_user', 'enruta_active_business'].forEach(key => localStorage.removeItem(key));
   }, []);
 
+  const applyProfile = useCallback((freshUser: User) => {
+    const storedId = localStorage.getItem('enruta_active_business');
+    const nextId = freshUser.businesses?.find(b => b.id === storedId)?.id ?? freshUser.businesses?.[0]?.id ?? null;
+    setUser(freshUser);
+    setActiveBusinessId(nextId);
+    localStorage.setItem('enruta_user', JSON.stringify(freshUser));
+    if (nextId) localStorage.setItem('enruta_active_business', nextId);
+    else localStorage.removeItem('enruta_active_business');
+  }, []);
+
+  const getUser = useCallback((): Promise<void> => {
+    const requestToken = localStorage.getItem('enruta_token');
+    if (!requestToken) return Promise.resolve();
+    return authService.getUser().then(freshUser => {
+      // Ignore a response from a session that was closed or replaced while in flight.
+      if (localStorage.getItem('enruta_token') !== requestToken) return;
+      setToken(requestToken);
+      applyProfile(freshUser);
+    }).catch((error: unknown) => {
+      const status = (error as { response?: { status: number } }).response?.status;
+      if ((status === 401 || status === 403) && localStorage.getItem('enruta_token') === requestToken) clearSession();
+      throw error;
+    });
+  }, [applyProfile, clearSession]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (!localStorage.getItem('enruta_token')) clearSession();
+      else void getUser().catch(() => undefined);
+    };
+    void getUser().catch(() => undefined).finally(() => setIsLoading(false));
+    window.addEventListener('focus', refresh);
+    window.addEventListener('enruta:access-denied', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('enruta:access-denied', refresh);
+    };
+  }, [getUser, clearSession]);
+
   const login = (newToken: string, newUser: User) => {
-    setToken(newToken);
-    setUser(newUser);
     localStorage.setItem('enruta_token', newToken);
-    localStorage.setItem('enruta_user', JSON.stringify(newUser));
-    
-    if (newUser.businesses && newUser.businesses.length > 0) {
-      setActiveBusinessId(newUser.businesses[0].id);
-      localStorage.setItem('enruta_active_business', newUser.businesses[0].id);
-    }
+    setToken(newToken);
+    applyProfile(newUser);
   };
 
   const logout = async () => {
-    setToken(null);
-    setUser(null);
-    setActiveBusinessId(null);
-    try {
-        await authService.logout();
-    } catch(e) {
-        console.error("Logout failed on server, clearing local state", e);
-        localStorage.removeItem('enruta_token');
-        localStorage.removeItem('enruta_user');
-        localStorage.removeItem('enruta_active_business');
-    }
-  };
-
-  const getUser = async () => {
-    try {
-      const freshUser = await authService.getUser();
-      setUser(freshUser);
-      localStorage.setItem('enruta_user', JSON.stringify(freshUser));
-      
-      // Asegurar que haya un negocio activo válido
-      const currentActiveId = localStorage.getItem('enruta_active_business');
-      if (currentActiveId && freshUser.businesses?.some(b => b.id === currentActiveId)) {
-        setActiveBusinessId(currentActiveId);
-      } else if (freshUser.businesses && freshUser.businesses.length > 0) {
-        setActiveBusinessId(freshUser.businesses[0].id);
-        localStorage.setItem('enruta_active_business', freshUser.businesses[0].id);
-      }
-    } catch (error) {
-      console.error("Failed to fetch fresh user data", error);
-    }
+    const previousToken = localStorage.getItem('enruta_token');
+    try { await authService.logout(); }
+    catch { /* Local logout also works if the token has already been rejected. */ }
+    finally { if (localStorage.getItem('enruta_token') === previousToken) clearSession(); }
   };
 
   const switchBusiness = (businessId: string) => {
@@ -99,11 +93,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
+// Existing consumers import the hook from this context module.
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth debe ser usado dentro de un AuthProvider');
   return context;
 };
-

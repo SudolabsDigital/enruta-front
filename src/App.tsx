@@ -23,7 +23,7 @@ function App() {
       <Route path="/register" element={<RegisterPage />} />
 
       {/* Protegido: Accesible por admin y operadores */}
-      <Route element={<ProtectedRoute allowedRoles={['super_admin', 'console_user']} />}>
+      <Route element={<ProtectedRoute />}>
         <Route path="/console" element={<ConsoleLayout />}>
           {/* Dashboard Dinámico / Buscar Rutas */}
           <Route index element={<ConsoleDashboardPage />} />

@@ -2,7 +2,7 @@ import api from '../../../config/api';
 
 export interface Business {
   id: string;
-  user_id: string;
+  user_id: string | null;
   city_id: string;
   name: string;
   type: string;

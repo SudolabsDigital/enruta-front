@@ -12,10 +12,32 @@ interface City {
 }
 
 export const OnboardingPage: React.FC = () => {
-  const { getUser } = useAuth();
+  const { getUser, user, logout } = useAuth();
   const navigate = useNavigate();
   const [cities, setCities] = useState<City[]>([]);
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [existingRuc, setExistingRuc] = useState('');
+  const [reason, setReason] = useState('');
+
+  const showError = (caught: unknown) => {
+    const response = (caught as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } }).response;
+    setError(Object.values(response?.data?.errors ?? {}).flat().join(' ') || response?.data?.message || 'No se pudo completar la solicitud. Inténtalo de nuevo.');
+  };
+
+  const requestExisting = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.post('/v1/business-memberships', { ruc: existingRuc, reason });
+      setMessage('Solicitud enviada. La gestión estará disponible cuando ENRUTA acredite tu representación.');
+      await getUser();
+    } catch (caught) { showError(caught); }
+    finally { setLoading(false); }
+  };
 
   const [formData, setFormData] = useState({
     name: '',
@@ -44,12 +66,14 @@ export const OnboardingPage: React.FC = () => {
     if (!formData.name || !formData.city_id) return;
     
     setLoading(true);
+    setError('');
+    setMessage('');
     try {
       await businessService.createBusiness(formData);
-      await getUser(); // Refetch user to get the new business
-      navigate('/console');
+      setMessage(user?.role === 'super_admin' ? 'Ficha registrada en el catálogo.' : 'Ficha y solicitud registradas. Pendiente de revisión por ENRUTA.');
+      await getUser();
     } catch (error) {
-      console.error('Error creating business:', error);
+      showError(error);
     } finally {
       setLoading(false);
     }
@@ -80,7 +104,7 @@ export const OnboardingPage: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-500 to-primary-800 p-8 flex items-center justify-center">
+    <div className="min-h-screen bg-gradient-to-br from-primary-500 to-primary-800 p-4 sm:p-8 flex items-center justify-center">
       <div className="w-full max-w-4xl mx-auto">
         
         <header className="mb-12 text-center flex flex-col items-center">
@@ -89,17 +113,41 @@ export const OnboardingPage: React.FC = () => {
             Bienvenido a la Consola de EnRuta
           </h1>
           <p className="text-white/90 text-lg mt-2 font-medium">
-            Para empezar, necesitamos registrar tu primer negocio. Podrás crear más después.
+            Solicita acceso a una empresa existente o registra su ficha. El registro no concede permisos de gestión.
           </p>
         </header>
 
         <div className="flex flex-col gap-8">
+          <section className="bg-white p-4 sm:p-8 rounded-2xl shadow-xl text-gray-900 break-words" aria-labelledby="access-heading">
+            <h2 id="access-heading" className="text-xl font-bold mb-4">Acceso empresarial</h2>
+            {message && <p role="status" className="mb-4">{message}</p>}
+            {error && <p role="alert" className="mb-4 text-red-700">{error}</p>}
+            <ul className="mb-4 space-y-2">
+              {user?.business_memberships?.map(link => <li key={link.id}>
+                <strong>{link.business.name}</strong>: {{ pending: 'Pendiente de revisión', active: 'Acreditado', rejected: 'Solicitud rechazada', revoked: 'Acceso revocado' }[link.status]}
+              </li>)}
+            </ul>
+            <div className="flex flex-wrap gap-3 mb-6">
+              <button type="button" className="min-h-11 px-3 border rounded-lg" disabled={loading} onClick={() => { void getUser().catch(showError); }}>Actualizar estado</button>
+              <button type="button" className="min-h-11 px-3 border rounded-lg" onClick={() => navigate('/console/search')}>Consultar rutas</button>
+              <button type="button" className="min-h-11 px-3 border rounded-lg" onClick={() => { void logout(); }}>Cerrar sesión</button>
+            </div>
+            <form onSubmit={requestExisting} className="flex flex-col gap-3">
+              <h3 className="font-bold">Mi empresa ya está registrada</h3>
+              <label htmlFor="existing-ruc">RUC de la empresa</label>
+              <input id="existing-ruc" required inputMode="numeric" pattern="[0-9]{11}" maxLength={11} value={existingRuc} onChange={e => setExistingRuc(e.target.value)} className="p-3 border border-gray-300 rounded-lg" />
+              <label htmlFor="request-reason">Motivo de la solicitud</label>
+              <textarea id="request-reason" required maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} className="p-3 border border-gray-300 rounded-lg" />
+              <p className="text-sm text-gray-700">Indica tu vínculo con la empresa. No incluyas contraseñas ni documentos personales aquí.</p>
+              <button type="submit" disabled={loading} className="min-h-11 p-3 bg-primary-600 text-white rounded-lg font-bold disabled:opacity-70">Solicitar acceso</button>
+            </form>
+          </section>
           
-          <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
+          <div className="bg-white p-4 sm:p-8 rounded-2xl shadow-xl border border-gray-100">
             <h2 className="text-xl font-bold mb-6 text-gray-900 tracking-tight">1. ¿Qué tipo de negocio deseas digitalizar?</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {businessTypes.map((type) => (
-                <div 
+                <button type="button" disabled={type.disabled}
                   key={type.id}
                   onClick={() => !type.disabled && setFormData(prev => ({ ...prev, type: type.id }))}
                   className={`p-6 border-2 rounded-xl relative transition-all duration-200 ${
@@ -121,19 +169,20 @@ export const OnboardingPage: React.FC = () => {
                       Próximamente
                     </span>
                   )}
-                </div>
+                </button>
               ))}
             </div>
           </div>
 
-          <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
-            <h2 className="text-xl font-bold mb-6 text-gray-900 tracking-tight">2. Datos del Negocio</h2>
+          <div className="bg-white p-4 sm:p-8 rounded-2xl shadow-xl border border-gray-100">
+            <h2 className="text-xl font-bold mb-6 text-gray-900 tracking-tight">2. Registrar una empresa nueva</h2>
             <form onSubmit={handleSubmit} className="flex flex-col gap-6">
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold text-gray-700">Nombre de la Empresa *</label>
+                  <label htmlFor="business-name" className="text-sm font-semibold text-gray-700">Nombre de la Empresa *</label>
                   <input 
+                    id="business-name"
                     type="text" 
                     required
                     placeholder="Ej: Transportes El Rápido S.A."
@@ -144,8 +193,9 @@ export const OnboardingPage: React.FC = () => {
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <label className="text-sm font-semibold text-gray-700">RUC (Opcional)</label>
+                  <label htmlFor="business-ruc" className="text-sm font-semibold text-gray-700">RUC *</label>
                   <input 
+                    id="business-ruc" required inputMode="numeric" pattern="[0-9]{11}"
                     type="text" 
                     placeholder="11 dígitos"
                     maxLength={11}
@@ -157,8 +207,9 @@ export const OnboardingPage: React.FC = () => {
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-semibold text-gray-700">Ciudad de Operación *</label>
+                <label htmlFor="business-city" className="text-sm font-semibold text-gray-700">Ciudad de Operación *</label>
                 <select 
+                  id="business-city"
                   required
                   value={formData.city_id}
                   onChange={e => setFormData(prev => ({ ...prev, city_id: e.target.value }))}
@@ -180,7 +231,7 @@ export const OnboardingPage: React.FC = () => {
                     (loading || !formData.name || !formData.city_id) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:shadow-md hover:-translate-y-0.5'
                   }`}
                 >
-                  {loading ? <Loader2 className="animate-spin" size={20} /> : 'Crear Negocio e Iniciar'}
+                  {loading ? <Loader2 className="animate-spin motion-reduce:animate-none" size={20} /> : user?.role === 'super_admin' ? 'Registrar ficha' : 'Registrar y solicitar acreditación'}
                   {!loading && <ArrowRight size={20} />}
                 </button>
               </div>
